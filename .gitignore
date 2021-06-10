@@ -1,0 +1,15 @@
+ANALYSIS/*
+katie*
+*.nextflow.log*
+*.nextflow
+report.*
+Analysis_Results-*
+.nextflow/
+abatest-2021031*
+analysis/*
+katie_test_out/*
+debug-test/*
+.vscode/*
+main
+.vscode/
+*.json
