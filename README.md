@@ -9,5 +9,5 @@ gcloud builds submit --config cloudbuild.yaml . --timeout=3h
 gcloud beta run deploy \
 --image gcr.io/andersen-lab/nscalc \
 --platform managed \
---service-account=nscalc-201573431837@andersen-lab.iam.gserviceaccount.com \
+--service-account nscalc-201573431837@andersen-lab.iam.gserviceaccount.com \
 nscalc
