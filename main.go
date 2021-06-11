@@ -25,7 +25,7 @@ const XCloudtasksQueuename = "nscalc"
 const SERVICE_ACCOUNT = "nscalc-201573431837@andersen-lab.iam.gserviceaccount.com"
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
-const IMAGE_URI = "northwesternmti/nemarun:0.37"
+const IMAGE_URI = "northwesternmti/nemarun:0.40"
 const PUB_SUB_TOPIC = "projects/andersen-lab/topics/nemarun"
 
 const MACHINE_TYPE = "n1-standard-4"
@@ -196,8 +196,7 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-
-	log.Printf("PUBSUB MESSSAGE:\t%s\t%s\t%s", m.Subscription, m.Message.ID, m.Message.Data)
+	log.Printf("PUBSUB BODY:\t%s", string(body))
 }
 
 func generateRunPipelineRequest(i *dsInfo) *lifesciences.RunPipelineRequest {
@@ -319,6 +318,9 @@ func executeRunPipelineRequest(i *dsInfo) string {
 
 	pOperation, pipelineRunErr := glsService.Projects.Locations.Pipelines.Run(PARENT, runPipelineRequest).Context(ctx).Do()
 	check(pipelineRunErr, i)
+
+	// TODO: check server response code
+
 	operationID := pOperation.Name
 
 	return operationID
