@@ -1,5 +1,3 @@
 .gcloudignore
 .gitignore
 #!include:.gitignore
-bin/
-input_data/

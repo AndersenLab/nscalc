@@ -19,15 +19,21 @@ import (
 	"google.golang.org/api/option"
 )
 
-const IMAGE_URI = "northwesternmti/nemarun:0.34"
+const PROJECT_ID = "andersen-lab"
 const XCloudtasksQueuename = "nscalc"
-const projectID = "andersen-lab"
-const TIMEOUT = "86400s"
+
 const SERVICE_ACCOUNT = "nscalc-201573431837@andersen-lab.iam.gserviceaccount.com"
-const PUB_SUB_TOPIC = "projects/andersen-lab/topics/nemarun"
-const MACHINE_TYPE = "n1-standard-1"
-const REGION = "us-central1"
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+const IMAGE_URI = "northwesternmti/nemarun:0.36"
+const PUB_SUB_TOPIC = "projects/andersen-lab/topics/nemarun"
+
+const MACHINE_TYPE = "n1-standard-4"
+const REGION = "us-central1"
+const TIMEOUT = "86400s"
+const BOOT_IMAGE = "projects/cos-cloud/global/images/family/cos-stable"
+
+const PARENT = "projects/201573431837/locations/us-central1"
 
 type Payload struct {
 	Hash    string
@@ -77,7 +83,7 @@ func check(e error, i *dsInfo) {
 // helper function to update status in datastore
 func setDatastoreStatus(i *dsInfo, status string, msg string) {
 	ctx := context.Background()
-	dsClient, err := datastore.NewClient(ctx, projectID)
+	dsClient, err := datastore.NewClient(ctx, PROJECT_ID)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -156,14 +162,15 @@ func nsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log & output details of the task.
-	setDatastoreStatus(&info, "RUNNING", "")
-	log.Printf("STARTED task: KIND: %s, ID: %s, HASH: %s", info.Kind, info.Id, info.Data_hash)
+	setDatastoreStatus(&info, "STARTING", "")
+	log.Printf("INITIALIZING task: KIND: %s, ID: %s, HASH: %s", info.Kind, info.Id, info.Data_hash)
 
 	// Start the nextflow pipeline
+	operationID := executeRunPipelineRequest(&info)
 
 	// Log & output details of the task.
-	setDatastoreStatus(&info, "COMPLETE", "")
-	log.Printf("COMPLETED task: KIND: %s, ID: %s, HASH: %s", info.Kind, info.Id, info.Data_hash)
+	setDatastoreStatus(&info, "RUNNING", operationID)
+	log.Printf("RUNNING task: KIND: %s, ID: %s, HASH: %s", info.Kind, info.Id, info.Data_hash)
 
 	if errJSONEncoder := json.NewEncoder(w).Encode("Submitted NemaScan"); errJSONEncoder != nil {
 		log.Printf("Error sending response: %v", errJSONEncoder)
@@ -190,113 +197,131 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := string(m.Message.Data)
-	if name == "" {
-		name = "World"
-	}
-	log.Printf("Hello %s!", name)
+	log.Printf("PUBSUB MESSSAGE:\t%s\t%s\t%s", m.Subscription, m.Message.ID, m.Message.Data)
 }
 
-func generateRunPipelineRequest(i *dsInfo) lifesciences.RunPipelineRequest {
-	return lifesciences.RunPipelineRequest{
-		Labels: map[string]string{},
-		Pipeline: &lifesciences.Pipeline{
-			Actions: []*lifesciences.Action{
-				&lifesciences.Action{
-					AlwaysRun:                   false,
-					BlockExternalNetwork:        false,
-					Commands:                    []string{fmt.Sprintf("nemarun.sh 'gs://elegansvariation.org/reports/nemascan/%s'", i.Data_hash)},
-					ContainerName:               "nfhost",
-					DisableImagePrefetch:        false,
-					DisableStandardErrorCapture: false,
-					EnableFuse:                  false,
-					Environment:                 map[string]string{},
-					IgnoreExitStatus:            false,
-					ImageUri:                    IMAGE_URI,
-					Labels:                      map[string]string{},
-					PidNamespace:                "",
-					PortMappings:                map[string]int64{},
-					PublishExposedPorts:         false,
-					RunInBackground:             false,
-					Timeout:                     TIMEOUT,
-					ForceSendFields:             []string{},
-					NullFields:                  []string{},
-				}},
-			Environment: map[string]string{},
-			Resources: &lifesciences.Resources{
-				Regions: []string{REGION},
-				VirtualMachine: &lifesciences.VirtualMachine{
-					BootDiskSizeGb:              15,
-					DockerCacheImages:           []string{},
-					EnableStackdriverMonitoring: true,
-					MachineType:                 MACHINE_TYPE,
-					Preemptible:                 true,
-					ServiceAccount: &lifesciences.ServiceAccount{
-						Email:           SERVICE_ACCOUNT,
-						Scopes:          []string{SCOPE},
-						ForceSendFields: []string{},
-						NullFields:      []string{},
-					},
-					ForceSendFields: []string{},
-					NullFields:      []string{},
-				},
-				Zones:           []string{},
-				ForceSendFields: []string{},
-				NullFields:      []string{},
-			},
-			Timeout:         TIMEOUT,
-			ForceSendFields: []string{},
-			NullFields:      []string{},
-		},
+func generateRunPipelineRequest(i *dsInfo) *lifesciences.RunPipelineRequest {
+	NS_ID := i.Data_hash
+	NS_DATA_PATH := "gs://elegansvariation.org/reports/nemascan"
+	NS_WORK_PATH := "gs://nf-pipelines/workdir"
+	NS_CONTAINER_NAME := fmt.Sprintf("nemarun-%s", i.Data_hash)
+	LOCAL_WORK_PATH := "/workdir"
+
+	pServiceAccount := &lifesciences.ServiceAccount{
+		Email:           SERVICE_ACCOUNT,
+		Scopes:          []string{SCOPE},
+		ForceSendFields: []string{},
+		NullFields:      []string{},
+	}
+
+	pMount := &lifesciences.Mount{
+		Disk:            "nf-pipeline-work",
+		Path:            LOCAL_WORK_PATH,
+		ReadOnly:        false,
+		ForceSendFields: []string{},
+		NullFields:      []string{},
+	}
+
+	pPersistentDisk := &lifesciences.PersistentDisk{
+		SizeGb:          500,
+		ForceSendFields: []string{},
+		NullFields:      []string{},
+	}
+
+	pVolume := &lifesciences.Volume{
+		PersistentDisk:  pPersistentDisk,
+		Volume:          "nf-pipeline-work",
+		ForceSendFields: []string{},
+		NullFields:      []string{},
+	}
+
+	pVirtualMachine := &lifesciences.VirtualMachine{
+		BootDiskSizeGb:              10,
+		BootImage:                   BOOT_IMAGE,
+		DockerCacheImages:           []string{},
+		EnableStackdriverMonitoring: true,
+		Labels:                      map[string]string{},
+		MachineType:                 MACHINE_TYPE,
+		Preemptible:                 true,
+		ServiceAccount:              pServiceAccount,
+		Volumes:                     []*lifesciences.Volume{pVolume},
+		ForceSendFields:             []string{},
+		NullFields:                  []string{},
+	}
+
+	pResources := &lifesciences.Resources{
+		Regions:         []string{REGION},
+		VirtualMachine:  pVirtualMachine,
+		Zones:           []string{},
+		ForceSendFields: []string{},
+		NullFields:      []string{},
+	}
+
+	pAction := &lifesciences.Action{
+		AlwaysRun:                   false,
+		BlockExternalNetwork:        false,
+		Commands:                    []string{"nemarun.sh", NS_ID, NS_DATA_PATH, NS_WORK_PATH},
+		ContainerName:               NS_CONTAINER_NAME,
+		DisableImagePrefetch:        false,
+		DisableStandardErrorCapture: false,
+		EnableFuse:                  false,
+		Entrypoint:                  "/bin/bash",
+		Environment:                 map[string]string{},
+		IgnoreExitStatus:            false,
+		ImageUri:                    IMAGE_URI,
+		Labels:                      map[string]string{},
+		Mounts:                      []*lifesciences.Mount{pMount},
+		PortMappings:                map[string]int64{},
+		PublishExposedPorts:         false,
+		RunInBackground:             false,
+		Timeout:                     TIMEOUT,
+		ForceSendFields:             []string{},
+		NullFields:                  []string{},
+	}
+
+	pPipeline := &lifesciences.Pipeline{
+		Actions:         []*lifesciences.Action{pAction},
+		Environment:     map[string]string{},
+		Resources:       pResources,
+		Timeout:         TIMEOUT,
+		ForceSendFields: []string{},
+		NullFields:      []string{},
+	}
+
+	return &lifesciences.RunPipelineRequest{
+		Labels:          map[string]string{},
+		Pipeline:        pPipeline,
 		PubSubTopic:     PUB_SUB_TOPIC,
 		ForceSendFields: []string{},
 		NullFields:      []string{},
 	}
 }
 
-func executeRunPipelineRequest(i *dsInfo) lifesciences.Operation {
+func executeRunPipelineRequest(i *dsInfo) string {
 	ctx := context.Background()
 
-	client, clientErr := google.DefaultClient(ctx, lifesciences.CloudPlatformScope)
-	check(clientErr, i)
+	gClient, gClientErr := google.DefaultClient(ctx, lifesciences.CloudPlatformScope)
+	check(gClientErr, i)
 
-	lifesciencesService, glsServiceErr := lifesciences.NewService(ctx, option.WithHTTPClient(client))
+	glsService, glsServiceErr := lifesciences.NewService(ctx, option.WithHTTPClient(gClient))
 	check(glsServiceErr, i)
 
-	// The project and location that this request should be executed against.
-	parent := "projects/201573431837/locations/us-central1"
-
 	runPipelineRequest := generateRunPipelineRequest(i)
-
 	pOperation := &lifesciences.Operation{
 		Done:            false,
 		Error:           &lifesciences.Status{},
 		Metadata:        []byte{},
-		Name:            XCloudtasksQueuename,
 		Response:        []byte{},
 		ServerResponse:  googleapi.ServerResponse{},
 		ForceSendFields: []string{},
 		NullFields:      []string{},
 	}
 
-	pOperation, pipelineRunErr := lifesciencesService.Projects.Locations.Pipelines.Run(parent, &runPipelineRequest).Context(ctx).Do()
+	pOperation, pipelineRunErr := glsService.Projects.Locations.Pipelines.Run(PARENT, runPipelineRequest).Context(ctx).Do()
 	check(pipelineRunErr, i)
+	operationID := pOperation.Name
 
-	log.Print(pOperation.Name)
-	return *pOperation
-
-}
-
-func testHandler(w http.ResponseWriter, r *http.Request) {
-	i := dsInfo{
-		Kind:      "DEV_ns_calc",
-		Id:        "123456",
-		Msg:       "",
-		Data_hash: "test",
-	}
-	executeRunPipelineRequest(&i)
-
-	fmt.Fprint(w, "200 OK")
+	return operationID
 }
 
 // indexHandler responds to requests with our greeting.
@@ -311,8 +336,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/", indexHandler)
-
-	http.HandleFunc("/testhandler", testHandler)
 	http.HandleFunc("/ns", nsHandler)
 	http.HandleFunc("/status", statusHandler)
 
