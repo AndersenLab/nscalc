@@ -25,7 +25,7 @@ const XCloudtasksQueuename = "nscalc"
 const SERVICE_ACCOUNT = "nscalc-201573431837@andersen-lab.iam.gserviceaccount.com"
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
-const IMAGE_URI = "northwesternmti/nemarun:0.42"
+const IMAGE_URI = "northwesternmti/nemarun:0.49"
 const PUB_SUB_TOPIC = "projects/andersen-lab/topics/nemarun"
 
 const MACHINE_TYPE = "n1-standard-4"
