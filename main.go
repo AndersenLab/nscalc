@@ -52,6 +52,7 @@ type dsEntry struct {
 	Username    string         `datastore:"username"`
 	Label       string         `datastore:"label"`
 	Data_hash   string         `datastore:"data_hash"`
+	Operation   string         `datastore:"operation"`
 	Trait       string         `datastore:"trait"`
 	Status      string         `datastore:"status"`
 	Status_msg  string         `datastore:"status_msg,noindex"`
@@ -61,13 +62,19 @@ type dsEntry struct {
 	K           *datastore.Key `datastore:"__key__"`
 }
 
+type Attr struct {
+	Operation string    `json:"operation"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // PubSubMessage is the payload of a Pub/Sub event.
 // See the documentation for more details:
 // https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage
 type PubSubMessage struct {
 	Message struct {
-		Data []byte `json:"data,omitempty"`
-		ID   string `json:"id"`
+		Attributes Attr   `json:"attributes"`
+		Data       []byte `json:"data,omitempty"`
+		ID         string `json:"id"`
 	} `json:"message"`
 	Subscription string `json:"subscription"`
 }
@@ -77,13 +84,13 @@ func check(e error, i *dsInfo) {
 	if e != nil {
 		msg := e.Error() + "\n" + i.Msg
 		log.Printf("ERROR: %s", e.Error())
-		setDatastoreStatus(i, "ERROR", msg)
+		setDatastoreStatus(i, "ERROR", msg, "")
 		panic(e)
 	}
 }
 
 // helper function to update status in datastore
-func setDatastoreStatus(i *dsInfo, status string, msg string) {
+func setDatastoreStatus(i *dsInfo, status string, msg string, op string) {
 	ctx := context.Background()
 	dsClient, err := datastore.NewClient(ctx, PROJECT_ID)
 	if err != nil {
@@ -99,6 +106,9 @@ func setDatastoreStatus(i *dsInfo, status string, msg string) {
 
 	e.Status = status
 	e.Status_msg = msg
+	if op != "" {
+		e.Operation = op
+	}
 
 	if _, err := dsClient.Put(ctx, k, e); err != nil {
 		log.Fatal(err)
@@ -164,14 +174,14 @@ func nsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log & output details of the task.
-	setDatastoreStatus(&info, "STARTING", "")
+	setDatastoreStatus(&info, "STARTING", "", "")
 	log.Printf("INITIALIZING task: KIND: %s, ID: %s, HASH: %s", info.Kind, info.Id, info.Data_hash)
 
 	// Start the nextflow pipeline
 	operationID := executeRunPipelineRequest(&info)
 
 	// Log & output details of the task.
-	setDatastoreStatus(&info, "RUNNING", operationID)
+	setDatastoreStatus(&info, "RUNNING", "", operationID)
 	log.Printf("RUNNING task: KIND: %s, ID: %s, HASH: %s", info.Kind, info.Id, info.Data_hash)
 
 	if errJSONEncoder := json.NewEncoder(w).Encode("Submitted NemaScan"); errJSONEncoder != nil {
@@ -198,7 +208,8 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	log.Printf("PUBSUB BODY:\t%s", string(body))
+	log.Printf("PUBSUB:\t%s", string(body))
+	getPipelineStatus(m.Message.Attributes.Operation)
 }
 
 func generateRunPipelineRequest(i *dsInfo) *lifesciences.RunPipelineRequest {
@@ -298,6 +309,34 @@ func generateRunPipelineRequest(i *dsInfo) *lifesciences.RunPipelineRequest {
 	}
 }
 
+func getPipelineStatus(op string) {
+	ctx := context.Background()
+
+	gClient, gClientErr := google.DefaultClient(ctx, lifesciences.CloudPlatformScope)
+	if gClientErr != nil {
+		log.Fatal(gClientErr)
+	}
+
+	glsService, glsServiceErr := lifesciences.NewService(ctx, option.WithHTTPClient(gClient))
+	if glsServiceErr != nil {
+		log.Fatal(glsServiceErr)
+	}
+
+	resp, err := glsService.Projects.Locations.Operations.Get(op).Context(ctx).Do()
+	if err != nil {
+		log.Fatal(err)
+	}
+	var opDone = "FALSE"
+	if resp.Done {
+		opDone = "TRUE"
+	}
+	opError := resp.Error
+	opName := resp.Name
+
+	// TODO: Change code below to process the `resp` object:
+	fmt.Printf("STATUS - NAME:%s DONE:%s ERROR:%#v\n", opName, opDone, opError)
+}
+
 func executeRunPipelineRequest(i *dsInfo) string {
 	ctx := context.Background()
 
@@ -322,9 +361,7 @@ func executeRunPipelineRequest(i *dsInfo) string {
 	check(pipelineRunErr, i)
 
 	// TODO: check server response code
-
 	operationID := pOperation.Name
-
 	return operationID
 }
 
