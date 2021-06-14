@@ -52,8 +52,10 @@ type dsEntry struct {
 	Username    string         `datastore:"username"`
 	Label       string         `datastore:"label"`
 	Data_hash   string         `datastore:"data_hash"`
+	Trait       string         `datastore:"trait"`
 	Status      string         `datastore:"status"`
 	Status_msg  string         `datastore:"status_msg,noindex"`
+	Report_path string         `datastore:"report_path,noindex"`
 	Modified_on time.Time      `datastore:"modified_on"`
 	Created_on  time.Time      `datastore:"created_on"`
 	K           *datastore.Key `datastore:"__key__"`

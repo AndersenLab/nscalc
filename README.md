@@ -1,4 +1,6 @@
-# This CloudRun server handles requests to complete a Genetic Mapping using the NemaScan Nextflow pipeline with Google Life Sciences
+# Nemascan Pipeline Runner
+
+This CloudRun server handles requests to complete a Genetic Mapping using the NemaScan Nextflow pipeline with Google Life Sciences
 
 Build using:
 
