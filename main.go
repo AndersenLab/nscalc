@@ -521,21 +521,6 @@ func main() {
 	http.HandleFunc("/ns", nsHandler)
 	http.HandleFunc("/status", statusHandler)
 
-	var info = dsInfo{
-		Kind:      "DEV_ns_calc",
-		Id:        "69fd5013448747a5bc7600c670a41324",
-		Msg:       "",
-		Data_hash: "f55965ba587eb8d366bd675761f9e297",
-	}
-
-	// Generate struct of options for the Pipeline
-	pOpts := generatePipelineOpts(info.Data_hash)
-
-	// Start the nextflow pipeline
-	operationID := executeRunPipelineRequest(&info, pOpts)
-
-	log.Printf("%v", operationID)
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
