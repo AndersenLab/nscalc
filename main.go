@@ -26,12 +26,12 @@ const XCloudtasksQueuename = "nscalc"
 const SERVICE_ACCOUNT = "nscalc-201573431837@andersen-lab.iam.gserviceaccount.com"
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
-const IMAGE_URI = "northwesternmti/nemarun:0.60"
+const IMAGE_URI = "northwesternmti/nemarun:0.61"
 const PUB_SUB_TOPIC = "projects/andersen-lab/topics/nemarun"
 
-const MACHINE_TYPE = "n1-standard-4"
-const PREEMPTIBLE = true
-const REGION = "us-central1"
+const MACHINE_TYPE = "n1-standard-1"
+const PREEMPTIBLE = false
+const ZONE = "us-central1-a"
 const TIMEOUT = "86400s"
 const BOOT_IMAGE = "projects/cos-cloud/global/images/family/cos-stable"
 const PARENT = "projects/201573431837/locations/us-central1"
@@ -63,7 +63,7 @@ type operationOptions struct {
 	Image_URI       string `datastore:"image_uri"`
 	Machine_Type    string `datastore:"machine_type"`
 	Preemptible     bool   `datastore:"preemptible"`
-	Region          string `datastore:"region"`
+	Zone            string `datastore:"zone"`
 	Timeout         string `datastore:"timeout"`
 	Boot_Image      string `datastore:"boot_image"`
 	Project_ID      string `datastore:"project_id"`
@@ -280,7 +280,7 @@ func generatePipelineOpts(Data_hash string) *operationOptions {
 		Image_URI:       IMAGE_URI,
 		Machine_Type:    MACHINE_TYPE,
 		Preemptible:     PREEMPTIBLE,
-		Region:          REGION,
+		Zone:            ZONE,
 		Timeout:         TIMEOUT,
 		Boot_Image:      BOOT_IMAGE,
 		Project_ID:      PROJECT_ID,
@@ -369,64 +369,38 @@ func generateRunPipelineRequest(i *dsInfo, pOpts *operationOptions) *lifescience
 		NullFields:      []string{},
 	}
 
-	pMount := &lifesciences.Mount{
-		Disk:            VOLUME_NAME,
-		Path:            LOCAL_WORK_PATH,
-		ReadOnly:        false,
-		ForceSendFields: []string{},
-		NullFields:      []string{},
-	}
-
-	pPersistentDisk := &lifesciences.PersistentDisk{
-		SizeGb:          500,
-		ForceSendFields: []string{},
-		NullFields:      []string{},
-	}
-
-	pVolume := &lifesciences.Volume{
-		PersistentDisk:  pPersistentDisk,
-		Volume:          VOLUME_NAME,
-		ForceSendFields: []string{},
-		NullFields:      []string{},
-	}
-
 	pVirtualMachine := &lifesciences.VirtualMachine{
-		BootDiskSizeGb:              10,
+		BootDiskSizeGb:              100,
 		BootImage:                   BOOT_IMAGE,
-		DockerCacheImages:           []string{},
 		EnableStackdriverMonitoring: true,
-		Labels:                      map[string]string{},
 		MachineType:                 MACHINE_TYPE,
 		Preemptible:                 PREEMPTIBLE,
 		ServiceAccount:              pServiceAccount,
-		Volumes:                     []*lifesciences.Volume{pVolume},
 		ForceSendFields:             []string{},
 		NullFields:                  []string{},
 	}
 
 	pResources := &lifesciences.Resources{
-		Regions:         []string{REGION},
 		VirtualMachine:  pVirtualMachine,
-		Zones:           []string{},
+		Zones:           []string{ZONE},
 		ForceSendFields: []string{},
 		NullFields:      []string{},
 	}
 
+	var TRAIT_FILE = fmt.Sprintf("%s/%s/data.tsv", NS_DATA_PATH, NS_ID)
+	var OUTPUT_DIR = fmt.Sprintf("%s/%s/results", NS_DATA_PATH, NS_ID)
+	var WORK_DIR = fmt.Sprintf("%s/%s", NS_WORK_PATH, NS_ID)
 	pAction := &lifesciences.Action{
 		AlwaysRun:                   false,
 		BlockExternalNetwork:        false,
-		Commands:                    []string{"nemarun.sh", NS_ID, NS_DATA_PATH, NS_WORK_PATH},
+		Commands:                    []string{"/nemarun/nemarun.sh"},
 		ContainerName:               NS_CONTAINER_NAME,
 		DisableImagePrefetch:        false,
 		DisableStandardErrorCapture: false,
 		EnableFuse:                  false,
-		Entrypoint:                  "/bin/bash",
-		Environment:                 map[string]string{},
+		Environment:                 map[string]string{"TRAIT_FILE": TRAIT_FILE, "OUTPUT_DIR": OUTPUT_DIR, "WORK_DIR": WORK_DIR},
 		IgnoreExitStatus:            false,
 		ImageUri:                    IMAGE_URI,
-		Labels:                      map[string]string{},
-		Mounts:                      []*lifesciences.Mount{pMount},
-		PortMappings:                map[string]int64{},
 		PublishExposedPorts:         false,
 		RunInBackground:             false,
 		Timeout:                     TIMEOUT,
@@ -436,7 +410,6 @@ func generateRunPipelineRequest(i *dsInfo, pOpts *operationOptions) *lifescience
 
 	pPipeline := &lifesciences.Pipeline{
 		Actions:         []*lifesciences.Action{pAction},
-		Environment:     map[string]string{},
 		Resources:       pResources,
 		Timeout:         TIMEOUT,
 		ForceSendFields: []string{},
@@ -451,7 +424,7 @@ func generateRunPipelineRequest(i *dsInfo, pOpts *operationOptions) *lifescience
 		Image_URI:       IMAGE_URI,
 		Machine_Type:    MACHINE_TYPE,
 		Preemptible:     PREEMPTIBLE,
-		Region:          REGION,
+		Zone:            ZONE,
 		Timeout:         TIMEOUT,
 		Boot_Image:      BOOT_IMAGE,
 		Project_ID:      PROJECT_ID,
@@ -462,7 +435,6 @@ func generateRunPipelineRequest(i *dsInfo, pOpts *operationOptions) *lifescience
 	}
 
 	return &lifesciences.RunPipelineRequest{
-		Labels:          map[string]string{},
 		Pipeline:        pPipeline,
 		PubSubTopic:     PUB_SUB_TOPIC,
 		ForceSendFields: []string{},
@@ -514,11 +486,14 @@ func executeRunPipelineRequest(pInfo *dsInfo, pOpts *operationOptions) string {
 
 	runPipelineRequest := generateRunPipelineRequest(pInfo, pOpts)
 	pOperation := &lifesciences.Operation{
-		Done:            false,
-		Error:           &lifesciences.Status{},
-		Metadata:        []byte{},
-		Response:        []byte{},
-		ServerResponse:  googleapi.ServerResponse{},
+		Done:     false,
+		Error:    &lifesciences.Status{},
+		Metadata: []byte{},
+		Response: []byte{},
+		ServerResponse: googleapi.ServerResponse{
+			HTTPStatusCode: 0,
+			Header:         map[string][]string{},
+		},
 		ForceSendFields: []string{},
 		NullFields:      []string{},
 	}
@@ -545,6 +520,21 @@ func main() {
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/ns", nsHandler)
 	http.HandleFunc("/status", statusHandler)
+
+	var info = dsInfo{
+		Kind:      "DEV_ns_calc",
+		Id:        "69fd5013448747a5bc7600c670a41324",
+		Msg:       "",
+		Data_hash: "f55965ba587eb8d366bd675761f9e297",
+	}
+
+	// Generate struct of options for the Pipeline
+	pOpts := generatePipelineOpts(info.Data_hash)
+
+	// Start the nextflow pipeline
+	operationID := executeRunPipelineRequest(&info, pOpts)
+
+	log.Printf("%v", operationID)
 
 	port := os.Getenv("PORT")
 	if port == "" {
