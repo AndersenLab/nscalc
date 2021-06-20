@@ -159,7 +159,7 @@ func updateOperationDSEntry(opID string, opDone bool, opErr bool) {
 
 	// query for matching data_hash
 	var data_hash = ""
-	query := datastore.NewQuery(DS_OPERATION_KIND).Filter("Operation =", opID)
+	query := datastore.NewQuery(DS_OPERATION_KIND).Filter("operation =", opID)
 	it := dsClient.Run(ctx, query)
 	for {
 		var opEntry dsOperationEntry
