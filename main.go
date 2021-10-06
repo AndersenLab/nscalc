@@ -274,11 +274,9 @@ func extractPayload(r *http.Request) (dsInfo, error) {
 func generatePipelineOpts(Data_hash string) *operationOptions {
 	// Configure the options for the pipeline
 	NS_CONTAINER_NAME := fmt.Sprintf("nemarun-%s", Data_hash)
-	TRAIT_FILE := fmt.Sprintf("%s/%s/data.tsv", NS_DATA_PATH, Data_hash)
-	WORK_DIR := fmt.Sprintf("%s/%s", NS_WORK_PATH, Data_hash)
 	return &operationOptions{
-		Data_path:       TRAIT_FILE,
-		Work_path:       WORK_DIR,
+		Data_path:       NS_DATA_PATH,
+		Work_path:       NS_WORK_PATH,
 		Container_Name:  NS_CONTAINER_NAME,
 		Volume_Name:     VOLUME_NAME,
 		Image_URI:       IMAGE_URI,
@@ -421,8 +419,8 @@ func generateRunPipelineRequest(i *dsInfo, pOpts *operationOptions) *lifescience
 	}
 
 	*pOpts = operationOptions{
-		Data_path:       TRAIT_FILE,
-		Work_path:       WORK_DIR,
+		Data_path:       NS_DATA_PATH,
+		Work_path:       NS_WORK_PATH,
 		Container_Name:  NS_CONTAINER_NAME,
 		Volume_Name:     VOLUME_NAME,
 		Image_URI:       IMAGE_URI,
